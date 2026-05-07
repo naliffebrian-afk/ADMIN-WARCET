@@ -1,0 +1,144 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helper Primitives ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isEmailVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Role check: fetching from database
+    function getOperatorRole(uid) {
+      return get(/databases/$(database)/documents/operators/$(uid)).data.role;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && getOperatorRole(request.auth.uid) == 'admin';
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    // --- Validation Blueprints ---
+
+    function isValidOperator(data) {
+      return data.userId == request.auth.uid 
+             && data.name is string && data.name.size() > 0 && data.name.size() <= 100
+             && data.email == request.auth.token.email
+             && data.role in ['admin', 'operator']
+             && data.status in ['active', 'inactive']
+             && data.createdAt == request.time
+             && data.updatedAt == request.time
+             && data.keys().hasAll(['userId', 'name', 'email', 'role', 'status', 'createdAt', 'updatedAt'])
+             && data.keys().size() == 7;
+    }
+
+    function isValidWorkerRecord(data) {
+      return data.operatorId is string && data.operatorId.size() > 0
+             && data.operatorName is string && data.operatorName.size() <= 100
+             && data.nama is string && data.nama.size() > 0 && data.nama.size() <= 200
+             && data.asalKota is string && data.asalKota.size() > 0 && data.asalKota.size() <= 200
+             && data.penempatan is string && data.penempatan.size() > 0 && data.penempatan.size() <= 200
+             && data.statusPekerja in ['AKTIF', 'TIDAK']
+             && data.bekerjaSelama is string && data.bekerjaSelama.size() > 0 && data.bekerjaSelama.size() <= 100
+             && data.statusKependudukan in ['MENIKAH', 'LAJANG', 'CERAI SAH', 'CERAI PISAH RANJANG']
+             && data.approvalStatus in ['PENDING', 'APPROVED', 'REJECTED']
+             && (
+                (data.keys().hasAll(['operatorId', 'operatorName', 'nama', 'asalKota', 'penempatan', 'statusPekerja', 'bekerjaSelama', 'statusKependudukan', 'approvalStatus', 'timestamp']) && data.keys().size() == 10) ||
+                (data.keys().hasAll(['operatorId', 'operatorName', 'nama', 'asalKota', 'penempatan', 'statusPekerja', 'bekerjaSelama', 'statusKependudukan', 'approvalStatus', 'timestamp', 'catatan']) && data.keys().size() == 11 && data.catatan is string && data.catatan.size() <= 1000)
+             );
+    }
+
+    function isValidAuditLog(data) {
+      return data.userId == request.auth.uid
+             && data.userName is string && data.userName.size() > 0
+             && data.action in ['CREATE', 'UPDATE', 'DELETE', 'APPROVAL_CHANGE']
+             && data.entityId is string && data.entityId.size() > 0
+             && data.timestamp == request.time
+             && (
+               (data.keys().hasAll(['userId', 'userName', 'action', 'entityId', 'timestamp']) && data.keys().size() == 5) ||
+               (data.keys().hasAll(['userId', 'userName', 'action', 'entityId', 'entityName', 'timestamp']) && data.keys().size() == 6) ||
+               (data.keys().hasAll(['userId', 'userName', 'action', 'entityId', 'entityName', 'details', 'timestamp']) && data.keys().size() == 7)
+             );
+    }
+
+    // --- Collection Rules ---
+
+    match /operators/{operatorId} {
+      allow get: if isSignedIn() && (isOwner(operatorId) || isAdmin());
+      allow list: if isAdmin();
+      
+      allow create: if isSignedIn() && isValidId(operatorId) && isOwner(operatorId) && isValidOperator(incoming());
+      
+      allow update: if isSignedIn() && isOwner(operatorId) 
+                    && incoming().userId == existing().userId
+                    && incoming().role == existing().role
+                    && incoming().createdAt == existing().createdAt
+                    && incoming().updatedAt == request.time
+                    && (
+                      incoming().diff(existing()).affectedKeys().hasOnly(['name', 'status', 'updatedAt'])
+                    );
+      
+      allow delete: if isAdmin();
+    }
+
+    match /entries/{entryId} {
+      // Security: List only if signed in AND user is a registered operator
+      allow list: if isSignedIn() && exists(/databases/$(database)/documents/operators/$(request.auth.uid));
+      allow get: if isSignedIn() && exists(/databases/$(database)/documents/operators/$(request.auth.uid));
+      
+      allow create: if isSignedIn() && isValidId(entryId) && isValidWorkerRecord(incoming())
+                    && incoming().operatorId == request.auth.uid
+                    && incoming().approvalStatus == 'PENDING'
+                    && incoming().timestamp == request.time
+                    && exists(/databases/$(database)/documents/operators/$(request.auth.uid));
+      
+      allow delete: if isSignedIn() && (
+        resource.data.operatorId == request.auth.uid || 
+        isAdmin()
+      );
+      
+      allow update: if isSignedIn() && isValidWorkerRecord(incoming()) && (
+        // Action: Approve/Reject (Any registered internal user)
+        (exists(/databases/$(database)/documents/operators/$(request.auth.uid)) && incoming().diff(existing()).affectedKeys().hasOnly(['approvalStatus'])) ||
+        // Action: Edit (Admin or Owner if pending)
+        (
+          (isAdmin() || (isOwner(existing().operatorId) && existing().approvalStatus == 'PENDING')) &&
+          incoming().operatorId == existing().operatorId &&
+          incoming().timestamp == existing().timestamp &&
+          incoming().approvalStatus == existing().approvalStatus &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['nama', 'asalKota', 'penempatan', 'statusPekerja', 'bekerjaSelama', 'statusKependudukan', 'catatan'])
+        )
+      );
+    }
+
+    match /audit-logs/{logId} {
+      allow list: if isSignedIn() && exists(/databases/$(database)/documents/operators/$(request.auth.uid));
+      allow get: if isSignedIn() && exists(/databases/$(database)/documents/operators/$(request.auth.uid));
+      allow create: if isSignedIn() && isValidId(logId) && isValidAuditLog(incoming())
+                    && exists(/databases/$(database)/documents/operators/$(request.auth.uid));
+      // No updates or deletes allowed for audit logs to maintain integrity
+    }
+  }
+}

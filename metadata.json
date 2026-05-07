@@ -1,0 +1,6 @@
+{
+  "name": "WARCET Database Operator",
+  "description": "Platform manajemen data dan input khusus untuk operator WARCET.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}

@@ -1,0 +1,67 @@
+{
+  "entities": {
+    "Operator": {
+      "title": "Operator Profile",
+      "description": "Details about a registered operator in the WARCET system.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Firebase Auth UID" },
+        "name": { "type": "string", "description": "Full name of the operator" },
+        "email": { "type": "string", "format": "email" },
+        "role": { "type": "string", "enum": ["admin", "operator"], "description": "Access level" },
+        "status": { "type": "string", "enum": ["active", "inactive"], "description": "Current status" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "name", "email", "role", "status", "createdAt", "updatedAt"]
+    },
+    "WorkerRecord": {
+      "title": "Worker Record",
+      "description": "Information about a worker entered into the system.",
+      "type": "object",
+      "properties": {
+        "operatorId": { "type": "string", "description": "UID of the operator who created this" },
+        "operatorName": { "type": "string" },
+        "nama": { "type": "string" },
+        "asalKota": { "type": "string" },
+        "penempatan": { "type": "string" },
+        "statusPekerja": { "type": "string", "enum": ["AKTIF", "TIDAK"] },
+        "bekerjaSelama": { "type": "string", "description": "Duration in months/years" },
+        "statusKependudukan": { "type": "string", "enum": ["MENIKAH", "LAJANG", "CERAI SAH", "CERAI PISAH RANJANG"] },
+        "catatan": { "type": "string", "description": "Additional notes" },
+        "approvalStatus": { "type": "string", "enum": ["PENDING", "APPROVED", "REJECTED"], "description": "Submission approval status" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["operatorId", "operatorName", "nama", "asalKota", "penempatan", "statusPekerja", "bekerjaSelama", "statusKependudukan", "approvalStatus", "timestamp"]
+    },
+    "AuditLog": {
+      "title": "Audit Log",
+      "description": "A record of an action taken by a user in the system.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "action": { "type": "string", "enum": ["CREATE", "UPDATE", "DELETE", "APPROVAL_CHANGE"] },
+        "entityId": { "type": "string", "description": "ID of the record being acted upon" },
+        "entityName": { "type": "string", "description": "Name of the worker for context" },
+        "details": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "userName", "action", "entityId", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/operators/{operatorId}": {
+      "schema": "Operator",
+      "description": "Collection of operator profiles."
+    },
+    "/entries/{entryId}": {
+      "schema": "WorkerRecord",
+      "description": "Global collection of worker records recorded by operators."
+    },
+    "/audit-logs/{logId}": {
+      "schema": "AuditLog",
+      "description": "History of actions performed in the system."
+    }
+  }
+}
